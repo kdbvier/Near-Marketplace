@@ -79,10 +79,15 @@ impl Contract {
     ) {
         let current_id = env::current_account_id();
         let owner = env::predecessor_account_id();
+        let attached_deposit = env::attached_deposit().as_yoctonear();
         let code = include_bytes!("./nft/nft.wasm").to_vec();
         let contract_bytes = code.len() as u128;
         let minimum_needed = NEAR_PER_STORAGE * contract_bytes + NFT_CONTRACT_STORAGE;
-
+        assert!(minimum_needed<=attached_deposit, "Must attach {} yoctoNEAR to cover storage", minimum_needed);
+        let refund = attached_deposit - minimum_needed;
+        if refund > 1 {
+            Promise::new(env::predecessor_account_id()).transfer(NearToken::from_yoctonear(refund));
+        }
         // Deploy the nft contract
         let nft_contract_id: AccountId = format!("{}.{}", metadata.symbol.to_lowercase(), current_id).parse().unwrap();
 

@@ -31,12 +31,23 @@ impl Default for Contract {
 impl Contract {
     #[init]
     pub fn init(ft_contract: Option<AccountId>, treasury: AccountId) -> Self {
+        if ft_contract.clone().is_some() {
+            Promise::new(ft_contract.clone().unwrap()).function_call(
+                "storage_deposit".to_string(), 
+                json!({
+                    "account_id": env::current_account_id()
+                }).to_string().into_bytes().to_vec(),
+                NearToken::from_millinear(100), 
+                Gas::from_tgas(20)
+            );
+        }
         Self {
             owner_contract: env::predecessor_account_id(),
             ft_contract,
             amount: 0,
             treasury: treasury
         }
+
     }
     
     #[payable]
@@ -64,6 +75,16 @@ impl Contract {
         let amount_to_owner = self.amount.checked_sub(amount_to_holders).unwrap();
         if let Some(ft_contract) = &self.ft_contract {
             Promise::new(ft_contract.clone()).function_call(
+                "storage_withdraw".to_string(),
+                json!({}).to_string().into_bytes().to_vec(),
+                NearToken::from_yoctonear(1),
+                Gas::from_tgas(20),
+            ).then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(Gas::from_tgas(10))
+                    .delete_account(owner.clone())
+            );
+            Promise::new(ft_contract.clone()).function_call(
                 "ft_transfer".to_string(), 
                 json!({
                     "receiver_id": owner.to_string(),
@@ -90,19 +111,21 @@ impl Contract {
                 NearToken::from_yoctonear(1),
                 Gas::from_tgas(20),
             );
-            Promise::new(ft_contract.clone()).function_call(
-                "storage_withdraw".to_string(),
-                json!({}).to_string().into_bytes().to_vec(),
-                NearToken::from_yoctonear(1),
-                Gas::from_tgas(20),
-            );
         } else {
             Promise::new(owner.clone()).transfer(NearToken::from_yoctonear(amount_to_owner));
             Promise::new(self.owner_contract.clone()).transfer(NearToken::from_yoctonear(amount_to_holders/2));
             Promise::new(treasury.clone()).transfer(NearToken::from_yoctonear(amount_to_holders/2));
+            Promise::new(env::current_account_id()).delete_account(owner);
         }
-        Promise::new(env::current_account_id()).delete_account(owner);
         self.amount = 0;
+    }
+
+    #[private]
+    pub fn delete_account(
+        &mut self,
+        owner: AccountId
+    ) -> Promise {
+        Promise::new(env::current_account_id()).delete_account(owner)
     }
 }
 

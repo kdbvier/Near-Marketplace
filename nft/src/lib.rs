@@ -153,12 +153,12 @@ impl Contract {
     #[payable]
     pub fn nft_mint(
         &mut self,
-        token_id: TokenId,
         token_owner_id: AccountId,
         token_metadata: TokenMetadata,
     ) -> Token {
         let collection_owner = &self.tokens.owner_id;
-        let owner = env::predecessor_account_id(); 
+        let owner = env::predecessor_account_id();
+        let token_id:TokenId = (self.index + 1).to_string();
         self.holders.insert(&owner);
         // assert_eq!(owner, self.tokens.owner_id, "Unauthorized");
 
@@ -186,7 +186,7 @@ impl Contract {
         Promise::new(vault_account_id.clone())
             .create_account()
             .deploy_contract(code)
-            .transfer(NearToken::from_yoctonear(minimum_needed))
+            .transfer(NearToken::from_yoctonear(deposit))
             .function_call(
                 // Init the vault contract
                 "init".to_string(),
@@ -201,7 +201,7 @@ impl Contract {
                     })
                 }.to_string().into_bytes().to_vec(),
                 NearToken::from_millinear(0),
-                Gas::from_tgas(20)
+                Gas::from_tgas(50)
             )
             .then(
                 Self::ext(env::current_account_id())
@@ -232,14 +232,6 @@ impl Contract {
     ) -> Promise {
         // Deposit ft or near
         if let Some(ft_id) = self.mint_currency.clone() {
-            Promise::new(ft_id.clone()).function_call(
-                "storage_deposit".to_string(), 
-                json!({
-                    "account_id": vault_account_id.to_string()
-                }).to_string().into_bytes().to_vec(),
-                NearToken::from_millinear(100), 
-                Gas::from_tgas(20)
-            );
             Promise::new(ft_id.clone()).function_call(
                 "ft_transfer_call".to_string(), 
                 json!({
