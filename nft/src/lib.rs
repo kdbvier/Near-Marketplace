@@ -66,9 +66,6 @@ pub struct Contract {
     
     pub payment_split_percent: u128,
 
-    //keep track of the storage that accounts have payed
-    pub storage_deposits: LookupMap<AccountId, u128>,
-
     //keep track of how many FTs each account has deposited in order to purchase NFTs with
     pub ft_deposits: LookupMap<AccountId, Balance>,
 
@@ -132,7 +129,6 @@ impl Contract {
             mint_price: mint_price.0,
             mint_currency,
             payment_split_percent: payment_split_percent.0,
-            storage_deposits: LookupMap::new(StorageKey::StorageDeposits),
             ft_deposits: LookupMap::new(StorageKey::FTDeposits),
             burn_fee: burn_fee.0,
             balances_by_owner: LookupMap::new(StorageKey::BalancesByOwner),
@@ -262,35 +258,6 @@ impl Contract {
             )
         }
     }
-    //Allows users to deposit storage. This is to cover the cost of storing sale objects on the contract
-    //Optional account ID is to users can pay for storage for other people.
-    #[payable]
-    pub fn storage_deposit(&mut self, account_id: Option<AccountId>) {
-        //get the account ID to pay for storage for
-        let storage_account_id = account_id 
-            //convert the valid account ID into an account ID
-            .map(|a| a.into())
-            //if we didn't specify an account ID, we simply use the caller of the function
-            .unwrap_or_else(env::predecessor_account_id);
-
-        //get the deposit value which is how much the user wants to add to their storage
-        let deposit: u128 = env::attached_deposit().as_yoctonear();
-
-        //make sure the deposit is greater than or equal to the minimum storage for a sale
-        assert!(
-            deposit >= STORAGE_PER_SALE,
-            "Requires minimum deposit of {}",
-            STORAGE_PER_SALE
-        );
-
-        //get the balance of the account (if the account isn't in the map we default to a balance of 0)
-        let mut balance: u128 = self.storage_deposits.get(&storage_account_id).unwrap_or(0);
-        //add the deposit to their balance
-        balance += deposit;
-        //insert the balance back into the map for that account ID
-        self.storage_deposits.insert(&storage_account_id, &balance);
-    }
-
     // Burn an NFT by its token ID
     #[payable]
     pub fn burn(&mut self, token_id: TokenId) {
@@ -445,11 +412,6 @@ impl Contract {
         };
         payout
     }
-    //return how much storage an account has paid for
-    pub fn storage_balance_of(&self, account_id: AccountId) -> U128 {
-        U128(self.storage_deposits.get(&account_id).unwrap_or(0))
-    }
-
     /// Get the amount of FTs the user has deposited into the contract
     pub fn ft_deposits_of(
         &self,
