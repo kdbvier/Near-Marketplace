@@ -1,5 +1,6 @@
 // Find all our documentation at https://docs.near.org
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
+use near_sdk::collections::UnorderedMap;
 use near_sdk::{env, NearToken, Gas, near_bindgen, AccountId, Promise, serde_json::json, require};
 use near_sdk::json_types::U128;
 // use near_contract_standards::fungible_token::core_impl::FungibleToken;
@@ -12,7 +13,8 @@ pub struct Contract {
     pub owner_contract: AccountId,
     pub ft_contract:  Option<AccountId>,
     pub amount: u128,
-    pub treasury: AccountId
+    pub treasury: AccountId,
+    pub owned_fts: UnorderedMap<AccountId, u128>
 }
 
 impl Default for Contract {
@@ -21,7 +23,8 @@ impl Default for Contract {
             owner_contract: env::predecessor_account_id(),
             ft_contract: None, // You need to specify the default value for ft_contract
             amount: 0, // You need to specify the default value for amount
-            treasury: env::predecessor_account_id()
+            treasury: env::predecessor_account_id(),
+            owned_fts: UnorderedMap::new(b"o")
         }
     }
 }
@@ -45,7 +48,8 @@ impl Contract {
             owner_contract: env::predecessor_account_id(),
             ft_contract,
             amount: 0,
-            treasury: treasury
+            treasury: treasury,
+            owned_fts: UnorderedMap::new(b"o")
         }
 
     }
@@ -87,7 +91,7 @@ impl Contract {
             Promise::new(ft_contract.clone()).function_call(
                 "ft_transfer".to_string(), 
                 json!({
-                    "receiver_id": owner.to_string(),
+                    "receiver_id": owner.clone().to_string(),
                     "amount": amount_to_owner.to_string(),                    
                 }).to_string().into_bytes().to_vec(),
                 NearToken::from_yoctonear(1),
@@ -115,7 +119,19 @@ impl Contract {
             Promise::new(owner.clone()).transfer(NearToken::from_yoctonear(amount_to_owner));
             Promise::new(self.owner_contract.clone()).transfer(NearToken::from_yoctonear(amount_to_holders/2));
             Promise::new(treasury.clone()).transfer(NearToken::from_yoctonear(amount_to_holders/2));
-            Promise::new(env::current_account_id()).delete_account(owner);
+            Promise::new(env::current_account_id()).delete_account(owner.clone());
+        }
+
+        for (owned_ft,_amount) in self.owned_fts.iter() {
+            Promise::new(owned_ft).function_call(
+                "ft_transfer".to_string(), 
+                json!({
+                    "receiver_id": owner.to_string(),
+                    "amount": _amount.to_string(),                    
+                }).to_string().into_bytes().to_vec(),
+                NearToken::from_yoctonear(1),
+                Gas::from_tgas(20),
+            );
         }
         self.amount = 0;
     }
@@ -142,18 +158,12 @@ trait FungibleTokenReceiver {
 impl FungibleTokenReceiver for Contract {
     fn ft_on_transfer(
         &mut self,
-        sender_id: AccountId,
+        _sender_id: AccountId,
         amount: U128,
     ) -> U128 {
         // get the contract ID which is the predecessor
         let ft_contract_id = env::predecessor_account_id();
-        if let Some(mint_currency) = self.ft_contract.clone() {
-            // Ensure only the specified FT can be used
-            require!(
-                ft_contract_id == mint_currency,
-                "FT contract ID does not match"
-            );
-
+        if ft_contract_id == self.ft_contract.clone().unwrap() {
             //get the signer which is the person who initiated the transaction
             let signer_id = env::signer_account_id();
 
@@ -164,16 +174,12 @@ impl FungibleTokenReceiver for Contract {
                 signer_id,
                 "ft_on_transfer should only be called via cross-contract call"
             );
-            //make sure the owner ID is the signer. 
-            // assert_eq!(
-            //     sender_id,
-            //     signer_id,
-            //     "owner_id should be signer_id"
-            // );
-
-            self.amount = amount.0;
+            self.amount = self.amount + amount.0;
+        } else {
+            let prev_amount = self.owned_fts.get(&ft_contract_id).unwrap_or(0);
+            let new_amount = prev_amount + amount.0;
+            self.owned_fts.insert(&ft_contract_id, &new_amount);
         }
-
         U128(0)
     }
 }
