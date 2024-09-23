@@ -158,7 +158,7 @@ trait FungibleTokenReceiver {
 impl FungibleTokenReceiver for Contract {
     fn ft_on_transfer(
         &mut self,
-        _sender_id: AccountId,
+        sender_id: AccountId,
         amount: U128,
     ) -> U128 {
         // get the contract ID which is the predecessor

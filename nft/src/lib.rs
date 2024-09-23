@@ -340,7 +340,7 @@ impl Contract {
                 "burn_fee": self.burn_fee.to_string(),
             }).to_string().into_bytes().to_vec(),
             NearToken::from_yoctonear(1),
-            Gas::from_tgas(100)
+            Gas::from_tgas(200)
         );
     }
 
