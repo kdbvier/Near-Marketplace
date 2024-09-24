@@ -27,7 +27,7 @@ use near_contract_standards::non_fungible_token::NonFungibleToken;
 use near_contract_standards::non_fungible_token::events::NftMint;
 use near_contract_standards::non_fungible_token::{Token, TokenId};
 use near_contract_standards::fungible_token::{receiver, Balance};
-use near_sdk::assert_one_yocto;
+use near_sdk::{assert_one_yocto, is_promise_success};
 use near_sdk::serde::{Serialize, Deserialize};
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
 use near_sdk::collections::{LazyOption, LookupMap, UnorderedSet};
@@ -226,6 +226,7 @@ impl Contract {
         owner_amount: u128,
         vault_amount: u128
     ) -> Promise {
+        assert!(is_promise_success(), "DS: Vault creation failed");
         // Deposit ft or near
         if let Some(ft_id) = self.mint_currency.clone() {
             Promise::new(ft_id.clone()).function_call(
@@ -265,7 +266,7 @@ impl Contract {
 
         let token_owner = self.tokens.owner_by_id.get(&token_id).unwrap();
 
-        assert_eq!(owner.clone(), token_owner, "You don't own this NFT");
+        require!(owner.clone() == token_owner, "You don't own this NFT");
 
         // Remove the NFT from the owner's account
         self.tokens.owner_by_id.remove(&token_id);
@@ -332,7 +333,6 @@ impl Contract {
 
         let current_id = env::current_account_id();
         let vault_account_id: AccountId = format!("{}.{}", token_id, current_id).parse().unwrap();
-
         Promise::new(vault_account_id.clone()).function_call(
             "withdraw".to_string(),
             json!({

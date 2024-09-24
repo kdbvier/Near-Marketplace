@@ -1,6 +1,8 @@
 // Find all our documentation at https://docs.near.org
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
 use near_sdk::collections::UnorderedMap;
+use near_sdk::env::promise_result;
+use near_sdk::{is_promise_success, promise_result_as_success};
 use near_sdk::{env, NearToken, Gas, near_bindgen, AccountId, Promise, serde_json::json, require};
 use near_sdk::json_types::U128;
 // use near_contract_standards::fungible_token::core_impl::FungibleToken;
@@ -77,18 +79,13 @@ impl Contract {
             .checked_mul(burn_fee.0).unwrap()
             .checked_div(100u128).unwrap();
         let amount_to_owner = self.amount.checked_sub(amount_to_holders).unwrap();
+        let p1;
+        let p2;
+        let p3;
+        let p4;
         if let Some(ft_contract) = &self.ft_contract {
-            Promise::new(ft_contract.clone()).function_call(
-                "storage_withdraw".to_string(),
-                json!({}).to_string().into_bytes().to_vec(),
-                NearToken::from_yoctonear(1),
-                Gas::from_tgas(20),
-            ).then(
-                Self::ext(env::current_account_id())
-                    .with_static_gas(Gas::from_tgas(10))
-                    .delete_account(owner.clone())
-            );
-            Promise::new(ft_contract.clone()).function_call(
+
+            p1 = Promise::new(ft_contract.clone()).function_call(
                 "ft_transfer".to_string(), 
                 json!({
                     "receiver_id": owner.clone().to_string(),
@@ -97,7 +94,8 @@ impl Contract {
                 NearToken::from_yoctonear(1),
                 Gas::from_tgas(20),
             );
-            Promise::new(ft_contract.clone()).function_call(
+            
+            p2 = Promise::new(ft_contract.clone()).function_call(
                 "ft_transfer".to_string(), 
                 json!({
                     "receiver_id": self.owner_contract.to_string(),
@@ -106,7 +104,7 @@ impl Contract {
                 NearToken::from_yoctonear(1),
                 Gas::from_tgas(20),
             );
-            Promise::new(ft_contract.clone()).function_call(
+            p3 = Promise::new(ft_contract.clone()).function_call(
                 "ft_transfer".to_string(), 
                 json!({
                     "receiver_id": treasury.clone().to_string(),
@@ -115,11 +113,18 @@ impl Contract {
                 NearToken::from_yoctonear(1),
                 Gas::from_tgas(20),
             );
+            p4 = Promise::new(ft_contract.clone()).function_call(
+                "storage_withdraw".to_string(),
+                json!({}).to_string().into_bytes().to_vec(),
+                NearToken::from_yoctonear(1),
+                Gas::from_tgas(20),
+            );
+
         } else {
-            Promise::new(owner.clone()).transfer(NearToken::from_yoctonear(amount_to_owner));
-            Promise::new(self.owner_contract.clone()).transfer(NearToken::from_yoctonear(amount_to_holders/2));
-            Promise::new(treasury.clone()).transfer(NearToken::from_yoctonear(amount_to_holders/2));
-            Promise::new(env::current_account_id()).delete_account(owner.clone());
+            p1 = Promise::new(owner.clone()).transfer(NearToken::from_yoctonear(amount_to_owner));
+            p2 = Promise::new(self.owner_contract.clone()).transfer(NearToken::from_yoctonear(amount_to_holders/2));
+            p3 = Promise::new(treasury.clone()).transfer(NearToken::from_yoctonear(amount_to_holders/2));
+            p4 = Promise::new(env::current_account_id()).delete_account(owner.clone());
         }
 
         for (owned_ft,_amount) in self.owned_fts.iter() {
@@ -133,6 +138,11 @@ impl Contract {
                 Gas::from_tgas(20),
             );
         }
+        p1.and(p2).and(p3).and(p4).then(
+            Self::ext(env::current_account_id())
+                .with_static_gas(Gas::from_tgas(10))
+                .delete_account(owner.clone())
+        );
         self.amount = 0;
     }
 
@@ -141,6 +151,7 @@ impl Contract {
         &mut self,
         owner: AccountId
     ) -> Promise {
+        require!(is_promise_success(), "Token transfer failed");
         Promise::new(env::current_account_id()).delete_account(owner)
     }
 }
