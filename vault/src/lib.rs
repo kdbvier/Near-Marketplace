@@ -1,7 +1,7 @@
 // Find all our documentation at https://docs.near.org
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
 use near_sdk::collections::UnorderedMap;
-use near_sdk::env::promise_result;
+use near_sdk::env::{predecessor_account_id, promise_result};
 use near_sdk::{is_promise_success, promise_result_as_success};
 use near_sdk::{env, NearToken, Gas, near_bindgen, AccountId, Promise, serde_json::json, require};
 use near_sdk::json_types::U128;
@@ -16,7 +16,8 @@ pub struct Contract {
     pub ft_contract:  Option<AccountId>,
     pub amount: u128,
     pub treasury: AccountId,
-    pub owned_fts: UnorderedMap<AccountId, u128>
+    pub owned_fts: UnorderedMap<AccountId, u128>,
+    pub admin: AccountId
 }
 
 impl Default for Contract {
@@ -26,7 +27,8 @@ impl Default for Contract {
             ft_contract: None, // You need to specify the default value for ft_contract
             amount: 0, // You need to specify the default value for amount
             treasury: env::predecessor_account_id(),
-            owned_fts: UnorderedMap::new(b"o")
+            owned_fts: UnorderedMap::new(b"o"),
+            admin: predecessor_account_id()
         }
     }
 }
@@ -35,7 +37,7 @@ impl Default for Contract {
 #[near_bindgen]
 impl Contract {
     #[init]
-    pub fn init(ft_contract: Option<AccountId>, treasury: AccountId) -> Self {
+    pub fn init(ft_contract: Option<AccountId>, treasury: AccountId, admin: AccountId) -> Self {
         if ft_contract.clone().is_some() {
             Promise::new(ft_contract.clone().unwrap()).function_call(
                 "storage_deposit".to_string(), 
@@ -51,18 +53,20 @@ impl Contract {
             ft_contract,
             amount: 0,
             treasury: treasury,
-            owned_fts: UnorderedMap::new(b"o")
+            owned_fts: UnorderedMap::new(b"o"),
+            admin
         }
-
     }
     
     #[payable]
     pub fn deposit_near(
         &mut self
     ) {
+        assert!(self.ft_contract.is_none(), "DS: Not able to deposit near.");
         let attached_amount = env::attached_deposit();
-        self.amount = attached_amount.as_yoctonear();
+        self.amount += attached_amount.as_yoctonear();
     }
+    
     #[payable]
     pub fn withdraw(
         &mut self,      
@@ -174,15 +178,15 @@ impl FungibleTokenReceiver for Contract {
     ) -> U128 {
         // get the contract ID which is the predecessor
         let ft_contract_id = env::predecessor_account_id();
+        let signer = env::signer_account_id();
+        assert_eq!(signer, self.admin, "Admin can only call this.");
         if ft_contract_id == self.ft_contract.clone().unwrap() {
             //get the signer which is the person who initiated the transaction
-            let signer_id = env::signer_account_id();
-
             //make sure that the signer isn't the predecessor. This is so that we're sure
             //this was called via a cross-contract call
             assert_ne!(
                 ft_contract_id,
-                signer_id,
+                signer,
                 "ft_on_transfer should only be called via cross-contract call"
             );
             self.amount = self.amount + amount.0;
@@ -190,6 +194,7 @@ impl FungibleTokenReceiver for Contract {
             let prev_amount = self.owned_fts.get(&ft_contract_id).unwrap_or(0);
             let new_amount = prev_amount + amount.0;
             self.owned_fts.insert(&ft_contract_id, &new_amount);
+            assert!(self.owned_fts.len() < 4, "DS: exceed maximum fts");
         }
         U128(0)
     }

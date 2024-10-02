@@ -77,7 +77,9 @@ pub struct Contract {
 
     pub treasury: AccountId,
 
-    pub royalty: u128
+    pub royalty: u128,
+    
+    pub admin: AccountId
 }
 
 const NEAR_PER_STORAGE: u128 = 10_000_000_000_000_000_000;
@@ -103,7 +105,8 @@ enum StorageKey {
 impl Contract {
     #[init]
     pub fn new(
-        owner_id: AccountId, 
+        owner_id: AccountId,
+        admin: AccountId,
         metadata: NFTContractMetadata,
         mint_price: U128,
         mint_currency: Option<AccountId>,
@@ -134,7 +137,8 @@ impl Contract {
             balances_by_owner: LookupMap::new(StorageKey::BalancesByOwner),
             holders: UnorderedSet::new(StorageKey::Holders),
             treasury: treasury,
-            royalty: royalty.0
+            royalty: royalty.0,
+            admin
         }
     }
 
@@ -189,11 +193,13 @@ impl Contract {
                 if let Some(ft_id) = self.mint_currency.clone() {
                     json!({
                         "ft_contract": ft_id.to_string(),
-                        "treasury": self.treasury.to_string()
+                        "treasury": self.treasury.to_string(),
+                        "admin": self.admin.to_string()
                     })
                 } else {
                     json!({
-                        "treasury": self.treasury.to_string()
+                        "treasury": self.treasury.to_string(),
+                        "admin": self.admin.to_string()
                     })
                 }.to_string().into_bytes().to_vec(),
                 NearToken::from_millinear(0),
@@ -262,6 +268,7 @@ impl Contract {
     // Burn an NFT by its token ID
     #[payable]
     pub fn burn(&mut self, token_id: TokenId) {
+        assert_one_yocto();
         let owner = env::predecessor_account_id();
 
         let token_owner = self.tokens.owner_by_id.get(&token_id).unwrap();
@@ -346,6 +353,7 @@ impl Contract {
 
     #[payable]
     pub fn withdraw(&mut self) {
+        assert_one_yocto();
         let owner = env::predecessor_account_id();
         let balance: u128 = self.balances_by_owner.get(&owner).unwrap_or(0);
 

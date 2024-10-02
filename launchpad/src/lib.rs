@@ -1,3 +1,4 @@
+use near_sdk::{assert_one_yocto, require};
 // Find all our documentation at https://docs.near.org
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
 use near_sdk::{
@@ -8,7 +9,6 @@ use near_sdk::json_types::U128;
 use near_contract_standards::non_fungible_token::metadata::NFTContractMetadata;
 use near_sdk::serde::{ Serialize, Deserialize };
 
-const NEAR_PER_STORAGE: u128 = 10_000_000_000_000_000_000;
 const NFT_CONTRACT_STORAGE: u128 = 30_000_000_000_000_000_000_000;
 
 // Define the contract structure
@@ -52,6 +52,7 @@ impl Contract {
         treasury: AccountId,
         admin: AccountId
     ) {
+        assert_one_yocto();
         assert_eq!(
             env::predecessor_account_id(),
             self.admin,
@@ -75,21 +76,26 @@ impl Contract {
         total_supply: U128,
         mint_price: U128,
         mint_currency: Option<AccountId>,
-        royalty: U128
+        royalty: U128,
+        payment_split_percent: u32,
+        burn_fee: u32,
+        nft_id: String
     ) {
         let current_id = env::current_account_id();
         let owner = env::predecessor_account_id();
         let attached_deposit = env::attached_deposit().as_yoctonear();
         let code = include_bytes!("./nft/nft.wasm").to_vec();
         let contract_bytes = code.len() as u128;
-        let minimum_needed = NEAR_PER_STORAGE * contract_bytes + NFT_CONTRACT_STORAGE;
+        let byte_cost = env::storage_byte_cost();
+        let minimum_needed = byte_cost.as_yoctonear() * contract_bytes + NFT_CONTRACT_STORAGE ;
         assert!(minimum_needed<=attached_deposit, "Must attach {} yoctoNEAR to cover storage", minimum_needed);
         let refund = attached_deposit - minimum_needed;
+        require!(burn_fee+payment_split_percent < 100, "DS: Invalid burn fee and payment split percent");
         if refund > 1 {
             Promise::new(env::predecessor_account_id()).transfer(NearToken::from_yoctonear(refund));
         }
         // Deploy the nft contract
-        let nft_contract_id: AccountId = format!("{}.{}", metadata.symbol.to_lowercase(), current_id).parse().unwrap();
+        let nft_contract_id: AccountId = format!("{}.{}", nft_id, current_id).parse().unwrap();
 
         Promise::new(nft_contract_id.clone())
             .create_account()
@@ -100,23 +106,25 @@ impl Contract {
                 if let Some(mint_currency) = mint_currency.clone() {
                     json!({
                         "owner_id": owner.to_string(),
+                        "admin": self.admin.to_string(),
                         "metadata": metadata,
                         "total_supply": total_supply.0.to_string(),
                         "mint_price": mint_price.0.to_string(),
                         "mint_currency": mint_currency.to_string(),
-                        "payment_split_percent": "50",
-                        "burn_fee": "10",
+                        "payment_split_percent": payment_split_percent.to_string(),
+                        "burn_fee": burn_fee.to_string(),
                         "treasury": self.treasury.to_string(),
                         "royalty": royalty.0.to_string()
                     })
                 } else {
                     json!({
                         "owner_id": owner.to_string(),
+                        "admin": self.admin.to_string(),
                         "metadata": metadata,
                         "total_supply": total_supply.0.to_string(),
                         "mint_price": mint_price.0.to_string(),
-                        "payment_split_percent": "50",
-                        "burn_fee": "10",
+                        "payment_split_percent": payment_split_percent.to_string(),
+                        "burn_fee": burn_fee.to_string(),
                         "treasury": self.treasury.to_string(),
                         "royalty": royalty.0.to_string()
                     })
