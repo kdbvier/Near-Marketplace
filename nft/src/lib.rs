@@ -36,6 +36,8 @@ use near_sdk::{
     env, near_bindgen, require, AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseOrValue, NearToken, Gas, 
     serde_json::json,
 };
+use rs_merkle::{ MerkleProof, MerkleTree, Hasher };
+use rs_merkle::algorithms::Sha256;
 use std::collections::HashMap;
 
 mod ft_balances;
@@ -78,8 +80,12 @@ pub struct Contract {
     pub treasury: AccountId,
 
     pub royalty: u128,
-    
-    pub admin: AccountId
+
+    pub root_hash: String,
+
+    pub is_public_mint: bool, 
+
+    pub whitelist_count: u32
 }
 
 const NEAR_PER_STORAGE: u128 = 10_000_000_000_000_000_000;
@@ -106,7 +112,6 @@ impl Contract {
     #[init]
     pub fn new(
         owner_id: AccountId,
-        admin: AccountId,
         metadata: NFTContractMetadata,
         mint_price: U128,
         mint_currency: Option<AccountId>,
@@ -114,7 +119,9 @@ impl Contract {
         total_supply: U128,
         burn_fee: U128,
         treasury: AccountId,
-        royalty: U128
+        royalty: U128,
+        root_hash: String,
+        whitelist_count: u32
     ) -> Self {
         require!(!env::state_exists(), "Already initialized");
         metadata.assert_valid();
@@ -138,10 +145,24 @@ impl Contract {
             holders: UnorderedSet::new(StorageKey::Holders),
             treasury: treasury,
             royalty: royalty.0,
-            admin
+            root_hash,
+            is_public_mint: true,
+            whitelist_count: whitelist_count
         }
     }
 
+    #[payable]
+    pub fn set_mint_type(&mut self, is_public_mint: bool) {
+        assert_one_yocto();
+        self.is_public_mint = is_public_mint;
+    }
+
+    #[payable]
+    pub fn set_root_hash(&mut self, root_hash: String, whitelist_count: u32) {
+        assert_one_yocto();
+        self.whitelist_count = whitelist_count;
+        self.root_hash = root_hash;
+    }
     /// Mint a new token with ID=`token_id` belonging to `token_owner_id`.
     ///
     /// Since this example implements metadata, it also requires per-token metadata to be provided
@@ -155,12 +176,22 @@ impl Contract {
         &mut self,
         token_owner_id: AccountId,
         token_metadata: TokenMetadata,
+        proof: String,
+        leaf_index: u32
     ) -> Token {
+        if !self.is_public_mint {
+            let proof_bytes: Vec<u8> = hex::decode(proof).expect("DS: Invalid proof");
+            // Parse proof back on the client
+            let proof = MerkleProof::<Sha256>::try_from(proof_bytes.clone()).unwrap();
+            let merkle_root_vec = hex::decode(&self.root_hash).expect("DS: Invalid proof");
+            let merkle_root: [u8; 32] = merkle_root_vec.try_into().map_err(|_| "Invalid merkle root").unwrap();
+            let leaves_to_prove = [Sha256::hash(env::predecessor_account_id().as_bytes())];
+            require!(proof.verify(merkle_root, &[leaf_index as usize], &leaves_to_prove, self.whitelist_count as usize), "DS: This user isn't whitelisted.");
+        }
         let collection_owner = &self.tokens.owner_id;
         let owner = env::predecessor_account_id();
         let token_id:TokenId = (self.index + 1).to_string();
         self.holders.insert(&owner);
-        // assert_eq!(owner, self.tokens.owner_id, "Unauthorized");
 
         let code = include_bytes!("./vault/vault.wasm").to_vec();
         let contract_bytes = code.len() as u128;
@@ -194,12 +225,12 @@ impl Contract {
                     json!({
                         "ft_contract": ft_id.to_string(),
                         "treasury": self.treasury.to_string(),
-                        "admin": self.admin.to_string()
+                        "admin": self.tokens.owner_id.to_string()
                     })
                 } else {
                     json!({
                         "treasury": self.treasury.to_string(),
-                        "admin": self.admin.to_string()
+                        "admin": self.tokens.owner_id.to_string()
                     })
                 }.to_string().into_bytes().to_vec(),
                 NearToken::from_millinear(0),
@@ -443,6 +474,8 @@ impl Contract {
     pub fn total_holders(&self) -> u64 {
         self.holders.len()
     }
+
+
 }
 
 #[near_bindgen]
@@ -596,5 +629,132 @@ impl NonFungibleTokenEnumeration for Contract {
 impl NonFungibleTokenMetadataProvider for Contract {
     fn nft_metadata(&self) -> NFTContractMetadata {
         self.metadata.get().unwrap()
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use rs_merkle::{MerkleProof, MerkleTree};
+    use rs_merkle::algorithms::Sha256;
+    use rs_merkle::Hasher;
+    use super::*;
+    use near_sdk::test_utils::{accounts, VMContextBuilder};
+    use near_sdk::testing_env;
+    use near_sdk::MockedBlockchain;
+    fn get_context(predecessor_account_id: AccountId) -> VMContextBuilder {
+        let mut builder = VMContextBuilder::new();
+        builder
+            .current_account_id(accounts(0))
+            .signer_account_id(predecessor_account_id.clone())
+            .predecessor_account_id(predecessor_account_id);
+        builder
+    }
+    fn setup_contract(
+        hash: String,
+        len: u32
+    ) -> (VMContextBuilder, Contract) {
+        let mut context = VMContextBuilder::new();
+        testing_env!(context.predecessor_account_id(accounts(0)).build());
+        let metadata = NFTContractMetadata {
+            spec: String::from("nft-1.0.0"),
+            name: String::from("DS"),
+            symbol: String::from("USS"),
+            icon: None,
+            base_uri: None,
+            reference: None,
+            reference_hash: None
+        };
+        let contract = Contract::new(
+            accounts(0),
+            metadata,
+            U128::from(10000000),
+            None,
+            U128::from(50),
+            U128::from(4444),
+            U128::from(10),
+            accounts(1),
+            U128::from(1000),
+            hash,
+            len
+        );
+        (context, contract)
+        
+    }
+
+
+    #[test]
+    fn test_merkle() {
+        let leaf_values = [
+            "viernear.testnet", 
+            "vier1near.testnet", 
+            "vier2near.testnet", 
+            "vier3near.testnet", 
+            "vier4near.testnet", 
+            "vier5near.testnet"
+        ];
+        let leaves: Vec<[u8; 32]> = leaf_values
+            .iter()
+            .map(|x| Sha256::hash(x.as_bytes()))
+            .collect();
+        let merkle_tree = MerkleTree::<Sha256>::from_leaves(&leaves);
+        let indices_to_prove = vec![1];
+        let leaves_to_prove = leaves.get(1..2).ok_or("can't get leaves to prove").unwrap();
+        let merkle_proof = merkle_tree.proof(&indices_to_prove);
+        let merkle_root = merkle_tree.root().ok_or("couldn't get the merkle root").unwrap();
+        // Serialize proof to pass it to the client
+        let proof_bytes: Vec<u8> = merkle_proof.to_bytes();
+        // Parse proof back on the client
+        let proof = MerkleProof::<Sha256>::try_from(proof_bytes.clone()).unwrap();
+        let hex_root = hex::encode(merkle_root.clone());
+        println!("{:?}", merkle_root);
+        println!("{:?}", hex_root);
+        println!("{:?}", hex::decode(hex_root).unwrap());
+        assert!(proof.verify(merkle_root, &indices_to_prove, leaves_to_prove, leaves.len()));
+    }
+    #[test]
+    fn test_mint() {
+        let leaf_values = [
+            accounts(0).to_string(),
+            accounts(1).to_string(), 
+            accounts(2).to_string(), 
+            accounts(3).to_string(), 
+            accounts(4).to_string(), 
+            accounts(5).to_string()
+        ];
+        println!("{:?}", leaf_values);
+        let leaves: Vec<[u8; 32]> = leaf_values
+            .iter()
+            .map(|x| Sha256::hash(x.as_bytes()))
+            .collect();
+        let merkle_tree = MerkleTree::<Sha256>::from_leaves(&leaves);
+        let merkle_root = merkle_tree.root().ok_or("couldn't get the merkle root").unwrap();
+        let merkle_root_hash = hex::encode(merkle_root);
+        println!("{:?}", merkle_root_hash);
+        let (mut context, mut contract) = setup_contract(merkle_root_hash, leaf_values.len() as u32);
+        testing_env!(context
+            .predecessor_account_id(accounts(0))
+            .attached_deposit(NearToken::from_near(10))
+            .build());
+        let token_metadata = TokenMetadata {
+            title: Some("Tsundere land".to_string()),
+            description: None,
+            media: Some("newmedia".to_string()),
+            media_hash: None,
+            copies: None,
+            issued_at: None,
+            expires_at: None,
+            starts_at: None,
+            updated_at: None,
+            extra: None,
+            reference: Some("newreference".to_string()),
+            reference_hash: None,
+        };
+        let indices_to_prove = vec![0];
+        let merkle_proof = merkle_tree.proof(&indices_to_prove);
+        let proof_bytes: Vec<u8> = merkle_proof.to_bytes();
+        let proof_hash = hex::encode(proof_bytes);
+        println!("Proof Hash: {:?}", proof_hash);
+        // contract.set_mint_type(false);
+        contract.nft_mint(accounts(0), token_metadata, proof_hash, indices_to_prove[0] as u32);
     }
 }

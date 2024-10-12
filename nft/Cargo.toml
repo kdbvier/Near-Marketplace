@@ -16,6 +16,9 @@ crate-type = ["cdylib", "rlib"]
 near-sdk = "5.0.0"
 near-contract-standards = "5.0.0"
 borsh = "1.3.1"
+sha2 = "0.10"  # For SHA-256 hashing  
+hex = "0.4"    # For hex encoding  
+rs_merkle = "1.4"
 
 [dev-dependencies]
 near-sdk = { version = "5.0.0", features = ["unit-testing"] }

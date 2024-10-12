@@ -79,10 +79,13 @@ impl Contract {
         royalty: U128,
         payment_split_percent: u32,
         burn_fee: u32,
-        nft_id: String
+        nft_id: String,
+        root_hash: String,
+        whitelist_count: u32,
     ) {
         let current_id = env::current_account_id();
         let owner = env::predecessor_account_id();
+        require!(owner == self.admin, "DS: only owner can call this.");
         let attached_deposit = env::attached_deposit().as_yoctonear();
         let code = include_bytes!("./nft/nft.wasm").to_vec();
         let contract_bytes = code.len() as u128;
@@ -106,7 +109,6 @@ impl Contract {
                 if let Some(mint_currency) = mint_currency.clone() {
                     json!({
                         "owner_id": owner.to_string(),
-                        "admin": self.admin.to_string(),
                         "metadata": metadata,
                         "total_supply": total_supply.0.to_string(),
                         "mint_price": mint_price.0.to_string(),
@@ -114,19 +116,22 @@ impl Contract {
                         "payment_split_percent": payment_split_percent.to_string(),
                         "burn_fee": burn_fee.to_string(),
                         "treasury": self.treasury.to_string(),
-                        "royalty": royalty.0.to_string()
+                        "royalty": royalty.0.to_string(),
+                        "root_hash": root_hash,
+                        "whitelist_count": whitelist_count
                     })
                 } else {
                     json!({
                         "owner_id": owner.to_string(),
-                        "admin": self.admin.to_string(),
                         "metadata": metadata,
                         "total_supply": total_supply.0.to_string(),
                         "mint_price": mint_price.0.to_string(),
                         "payment_split_percent": payment_split_percent.to_string(),
                         "burn_fee": burn_fee.to_string(),
                         "treasury": self.treasury.to_string(),
-                        "royalty": royalty.0.to_string()
+                        "royalty": royalty.0.to_string(),
+                        "root_hash": root_hash,
+                        "whitelist_count": whitelist_count
                     })
                 }.to_string().into_bytes().to_vec(),
                 NearToken::from_yoctonear(0),
