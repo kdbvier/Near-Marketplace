@@ -1,8 +1,7 @@
 // Find all our documentation at https://docs.near.org
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
 use near_sdk::collections::UnorderedMap;
-use near_sdk::env::{predecessor_account_id, promise_result};
-use near_sdk::{is_promise_success, promise_result_as_success};
+use near_sdk::{is_promise_success, PromiseOrValue};
 use near_sdk::{env, NearToken, Gas, near_bindgen, AccountId, Promise, serde_json::json, require};
 use near_sdk::json_types::U128;
 // use near_contract_standards::fungible_token::core_impl::FungibleToken;
@@ -28,7 +27,7 @@ impl Default for Contract {
             amount: 0, // You need to specify the default value for amount
             treasury: env::predecessor_account_id(),
             owned_fts: UnorderedMap::new(b"o"),
-            admin: predecessor_account_id()
+            admin: env::predecessor_account_id()
         }
     }
 }
@@ -67,87 +66,120 @@ impl Contract {
         self.amount += attached_amount.as_yoctonear();
     }
     
-    #[payable]
-    pub fn withdraw(
-        &mut self,      
-        owner: AccountId,
-        burn_fee: U128,
-    ) {
-        assert_eq!(
-            env::predecessor_account_id(),
-            self.owner_contract,
-            "Only the owner contract can withdraw"
-        );
-        let treasury = &self.treasury;
-        let amount_to_holders: u128 = self.amount
-            .checked_mul(burn_fee.0).unwrap()
-            .checked_div(100u128).unwrap();
-        let amount_to_owner = self.amount.checked_sub(amount_to_holders).unwrap();
-        let p1;
-        let p2;
-        let p3;
-        let p4;
-        if let Some(ft_contract) = &self.ft_contract {
-
-            p1 = Promise::new(ft_contract.clone()).function_call(
+    #[payable] 
+    pub fn withdraw(&mut self, owner: AccountId, burn_fee: U128) { 
+        assert_eq!( 
+            env::predecessor_account_id(), 
+            self.owner_contract, 
+            "Only the owner contract can withdraw" 
+        ); 
+        let treasury = &self.treasury; 
+        let amount_to_holders: u128 = self 
+            .amount 
+            .checked_mul(burn_fee.0) 
+            .unwrap() 
+            .checked_div(100u128) 
+            .unwrap(); 
+        let amount_to_owner = self.amount.checked_sub(amount_to_holders).unwrap(); 
+        let combined_promise = if let Some(ft_contract) = &self.ft_contract { 
+            let owner_amount = amount_to_holders / 2; 
+            let treasury_amount = amount_to_holders - owner_amount; 
+            let p = Promise::new(ft_contract.clone()) 
+                .function_call( 
+                    "ft_transfer".to_owned(), 
+                    json!({ 
+                        "receiver_id": owner.clone().to_string(), 
+                        "amount": amount_to_owner.to_string(), 
+                    }) 
+                    .to_string() 
+                    .into_bytes(), 
+                    NearToken::from_yoctonear(1), 
+                    Gas::from_tgas(20), 
+                ) 
+                .function_call( 
+                    "ft_transfer".to_owned(), 
+                    json!({ 
+                        "receiver_id": self.owner_contract.to_string(), 
+                        "amount": owner_amount.to_string(), 
+                    }) 
+                    .to_string() 
+                    .into_bytes(), 
+                    NearToken::from_yoctonear(1), 
+                    Gas::from_tgas(20), 
+                ) 
+                .function_call( 
+                    "ft_transfer".to_owned(), 
+                    json!({ 
+                        "receiver_id": treasury.clone().to_string(), 
+                        "amount": treasury_amount.to_string(), 
+                    }) 
+                    .to_string() 
+                    .into_bytes(), 
+                    NearToken::from_yoctonear(1), 
+                    Gas::from_tgas(20), 
+                ) 
+                .function_call( 
+                    "storage_withdraw".to_owned(), 
+                    json!({}).to_string().into_bytes(), 
+                    NearToken::from_yoctonear(1), 
+                    Gas::from_tgas(20), 
+                ); 
+            p
+        } else { 
+            let p1 = 
+                Promise::new(owner.clone()).transfer(NearToken::from_yoctonear(amount_to_owner)); 
+            let p2 = Promise::new(self.owner_contract.clone()) 
+                .transfer(NearToken::from_yoctonear(amount_to_holders / 2)); 
+            let p3 = Promise::new(treasury.clone()) 
+                .transfer(NearToken::from_yoctonear(amount_to_holders / 2)); 
+            p1.and(p2).and(p3)
+        }; 
+ 
+        for (owned_ft, _amount) in self.owned_fts.iter() { 
+            Promise::new(owned_ft).function_call( 
                 "ft_transfer".to_string(), 
-                json!({
-                    "receiver_id": owner.clone().to_string(),
-                    "amount": amount_to_owner.to_string(),                    
-                }).to_string().into_bytes().to_vec(),
-                NearToken::from_yoctonear(1),
-                Gas::from_tgas(20),
-            );
-            
-            p2 = Promise::new(ft_contract.clone()).function_call(
-                "ft_transfer".to_string(), 
-                json!({
-                    "receiver_id": self.owner_contract.to_string(),
-                    "amount": (amount_to_holders/2).to_string(),                    
-                }).to_string().into_bytes().to_vec(),
-                NearToken::from_yoctonear(1),
-                Gas::from_tgas(20),
-            );
-            p3 = Promise::new(ft_contract.clone()).function_call(
-                "ft_transfer".to_string(), 
-                json!({
-                    "receiver_id": treasury.clone().to_string(),
-                    "amount": (amount_to_holders/2).to_string(),                    
-                }).to_string().into_bytes().to_vec(),
-                NearToken::from_yoctonear(1),
-                Gas::from_tgas(20),
-            );
-            p4 = Promise::new(ft_contract.clone()).function_call(
-                "storage_withdraw".to_string(),
-                json!({}).to_string().into_bytes().to_vec(),
-                NearToken::from_yoctonear(1),
-                Gas::from_tgas(20),
-            );
-
-        } else {
-            p1 = Promise::new(owner.clone()).transfer(NearToken::from_yoctonear(amount_to_owner));
-            p2 = Promise::new(self.owner_contract.clone()).transfer(NearToken::from_yoctonear(amount_to_holders/2));
-            p3 = Promise::new(treasury.clone()).transfer(NearToken::from_yoctonear(amount_to_holders/2));
-            p4 = Promise::new(env::current_account_id()).delete_account(owner.clone());
-        }
-
-        for (owned_ft,_amount) in self.owned_fts.iter() {
-            Promise::new(owned_ft).function_call(
-                "ft_transfer".to_string(), 
-                json!({
-                    "receiver_id": owner.to_string(),
-                    "amount": _amount.to_string(),                    
-                }).to_string().into_bytes().to_vec(),
-                NearToken::from_yoctonear(1),
-                Gas::from_tgas(20),
-            );
-        }
-        p1.and(p2).and(p3).and(p4).then(
-            Self::ext(env::current_account_id())
-                .with_static_gas(Gas::from_tgas(10))
-                .delete_account(owner.clone())
-        );
-        self.amount = 0;
+                json!({ 
+                    "receiver_id": owner.to_string(), 
+                    "amount": _amount.to_string(), 
+                }) 
+                .to_string() 
+                .into_bytes() 
+                .to_vec(), 
+                NearToken::from_yoctonear(1), 
+                Gas::from_tgas(20), 
+            ); 
+        } 
+        combined_promise.then( 
+            Self::ext(env::current_account_id()) 
+                .with_static_gas(Gas::from_tgas(10)) 
+                .callback_delete_account(owner.clone(), self.amount.into()), 
+        ); 
+        self.amount = 0; 
+    } 
+ 
+    #[private] 
+    pub fn callback_delete_account( 
+        &mut self, 
+        owner: AccountId, 
+        amount: U128, 
+    ) -> PromiseOrValue<bool> { 
+        //require!(is_promise_success(), "Token transfer failed"); 
+        let results_count = env::promise_results_count(); 
+        let mut should_revert = false; 
+        for promise_idx in 0..results_count { 
+            match env::promise_result(promise_idx) { 
+                near_sdk::PromiseResult::Successful(_) => {} 
+                near_sdk::PromiseResult::Failed => should_revert = true, 
+            } 
+        } 
+ 
+        if should_revert { 
+            self.amount = amount.into(); 
+            return PromiseOrValue::Value(false); 
+        } else { 
+            let delete_promise = Promise::new(env::current_account_id()).delete_account(owner); 
+            return PromiseOrValue::Promise(delete_promise); 
+        } 
     }
 
     #[private]
@@ -158,6 +190,7 @@ impl Contract {
         require!(is_promise_success(), "Token transfer failed");
         Promise::new(env::current_account_id()).delete_account(owner)
     }
+
 }
 
 

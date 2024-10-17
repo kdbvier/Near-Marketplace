@@ -26,7 +26,7 @@ use near_contract_standards::non_fungible_token::metadata::{
 use near_contract_standards::non_fungible_token::NonFungibleToken;
 use near_contract_standards::non_fungible_token::events::NftMint;
 use near_contract_standards::non_fungible_token::{Token, TokenId};
-use near_contract_standards::fungible_token::{receiver, Balance};
+use near_contract_standards::fungible_token::{Balance};
 use near_sdk::{assert_one_yocto, is_promise_success};
 use near_sdk::serde::{Serialize, Deserialize};
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
@@ -36,7 +36,7 @@ use near_sdk::{
     env, near_bindgen, require, AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseOrValue, NearToken, Gas, 
     serde_json::json,
 };
-use rs_merkle::{ MerkleProof, MerkleTree, Hasher };
+use rs_merkle::{ MerkleProof, Hasher };
 use rs_merkle::algorithms::Sha256;
 use std::collections::HashMap;
 
@@ -90,7 +90,6 @@ pub struct Contract {
 
 const NEAR_PER_STORAGE: u128 = 10_000_000_000_000_000_000;
 //the minimum storage to have a sale on the contract.
-const STORAGE_PER_SALE: u128 = 1000 * NEAR_PER_STORAGE;
 const VAULT_STORAGE: u128 = 19_800_000_000_000_000_000_000;
 
 #[derive(BorshSerialize, BorshStorageKey)]
@@ -101,7 +100,6 @@ enum StorageKey {
     TokenMetadata,
     Enumeration,
     Approval,
-    StorageDeposits,
     FTDeposits,
     BalancesByOwner,
     Holders,
@@ -146,7 +144,7 @@ impl Contract {
             treasury: treasury,
             royalty: royalty.0,
             root_hash,
-            is_public_mint: true,
+            is_public_mint: false,
             whitelist_count: whitelist_count
         }
     }
@@ -154,12 +152,16 @@ impl Contract {
     #[payable]
     pub fn set_mint_type(&mut self, is_public_mint: bool) {
         assert_one_yocto();
+        let owner = env::predecessor_account_id();
+        require!(owner == self.tokens.owner_id, "DS: You are not an owner.");
         self.is_public_mint = is_public_mint;
     }
 
     #[payable]
     pub fn set_root_hash(&mut self, root_hash: String, whitelist_count: u32) {
         assert_one_yocto();
+        let owner = env::predecessor_account_id();
+        require!(owner == self.tokens.owner_id, "DS: You are not an owner.");
         self.whitelist_count = whitelist_count;
         self.root_hash = root_hash;
     }
@@ -192,15 +194,15 @@ impl Contract {
         let owner = env::predecessor_account_id();
         let token_id:TokenId = (self.index + 1).to_string();
         self.holders.insert(&owner);
-
         let code = include_bytes!("./vault/vault.wasm").to_vec();
         let contract_bytes = code.len() as u128;
         let minimum_needed = NEAR_PER_STORAGE * contract_bytes + VAULT_STORAGE;
-
         let deposit: u128 = env::attached_deposit().as_yoctonear();
         if let Some(_) = self.mint_currency.clone() {
-            let amount = self.ft_deposits_of(owner.clone());
+            let mut amount = self.ft_deposits_of(owner.clone());
             require!(deposit >= minimum_needed && amount >= self.mint_price, "Insufficient price to mint");
+            amount -= self.mint_price;
+            self.ft_deposits.insert(&owner, &amount);
         } else {
             require!(deposit >= self.mint_price + minimum_needed, "Insufficient price to mint");
         }
@@ -399,13 +401,68 @@ impl Contract {
                     }).to_string().into_bytes().to_vec(),
                     NearToken::from_yoctonear(1),
                     Gas::from_tgas(20),
+                ).then(
+                    Self::ext(env::current_account_id())
+                        .with_static_gas(Gas::from_tgas(10))
+                        .callback_withdraw(owner.clone(), balance)
                 );
             } else {
-                Promise::new(owner.clone()).transfer(NearToken::from_yoctonear(balance));
+                Promise::new(owner.clone())
+                    .transfer(NearToken::from_yoctonear(balance))
+                    .then(
+                        Self::ext(env::current_account_id())
+                            .with_static_gas(Gas::from_tgas(10))
+                            .callback_withdraw(owner.clone(), balance)
+                    );
             }
 
             self.balances_by_owner.insert(&owner, &0u128).unwrap();
         }
+    }
+    #[payable]
+    pub fn withdraw_tokens(&mut self) {
+        assert_one_yocto();
+        let owner = env::predecessor_account_id();
+        let balance = self.ft_deposits.get(&owner).unwrap_or(0);
+        if balance > 0 {
+            if let Some(ft_id) = self.mint_currency.clone() {
+                Promise::new(ft_id.clone()).function_call(
+                    "ft_transfer".to_string(), 
+                    json!({
+                        "receiver_id": owner.to_string(),
+                        "amount": balance.to_string(),
+                    }).to_string().into_bytes().to_vec(),
+                    NearToken::from_yoctonear(1),
+                    Gas::from_tgas(20),
+                ).then(
+                    Self::ext(env::current_account_id())
+                        .with_static_gas(Gas::from_tgas(10))
+                        .callback_withdraw_tokens(owner.clone(), balance)
+                );
+                self.ft_deposits.insert(&owner, &0u128);
+            }
+        }
+    }
+
+    #[private] 
+    pub fn callback_withdraw( 
+        &mut self, 
+        owner: AccountId, 
+        amount: u128, 
+    ) { 
+        if !is_promise_success() {
+            self.balances_by_owner.insert(&owner, &amount).unwrap();
+        };
+    }
+    #[private] 
+    pub fn callback_withdraw_tokens( 
+        &mut self, 
+        owner: AccountId, 
+        amount: u128, 
+    ) { 
+        if !is_promise_success() {
+            self.ft_deposits.insert(&owner, &amount).unwrap();
+        };
     }
 
     #[payable]
@@ -463,6 +520,10 @@ impl Contract {
         self.index
     }
 
+    pub fn get_merkle_root(&self) -> String {
+        self.root_hash.clone()
+    }
+
     pub fn total_supply(&self) -> u128 {
         self.total_supply
     }
@@ -474,8 +535,6 @@ impl Contract {
     pub fn total_holders(&self) -> u64 {
         self.holders.len()
     }
-
-
 }
 
 #[near_bindgen]
