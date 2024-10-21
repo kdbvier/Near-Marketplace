@@ -181,16 +181,6 @@ impl Contract {
             return PromiseOrValue::Promise(delete_promise); 
         } 
     }
-
-    #[private]
-    pub fn delete_account(
-        &mut self,
-        owner: AccountId
-    ) -> Promise {
-        require!(is_promise_success(), "Token transfer failed");
-        Promise::new(env::current_account_id()).delete_account(owner)
-    }
-
 }
 
 
