@@ -202,7 +202,7 @@ impl FungibleTokenReceiver for Contract {
         // get the contract ID which is the predecessor
         let ft_contract_id = env::predecessor_account_id();
         let signer = env::signer_account_id();
-        assert_eq!(signer, self.admin, "Admin can only call this.");
+        // assert_eq!(signer, self.admin, "Admin can only call this.");
         if ft_contract_id == self.ft_contract.clone().unwrap() {
             //get the signer which is the person who initiated the transaction
             //make sure that the signer isn't the predecessor. This is so that we're sure
