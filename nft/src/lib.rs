@@ -32,7 +32,7 @@ use near_sdk::serde::{Serialize, Deserialize};
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
 use near_sdk::collections::{LazyOption, LookupMap, UnorderedSet};
 use near_sdk::json_types::U128;
-use near_sdk::{
+use near_sdk::{near, 
     env, near_bindgen, require, AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseOrValue, NearToken, Gas, 
     serde_json::json,
 };
@@ -42,8 +42,7 @@ use std::collections::HashMap;
 
 mod ft_balances;
 
-#[derive(Serialize, Deserialize)]
-#[serde(crate = "near_sdk::serde")]
+#[near(serializers=[json])] 
 pub struct Payout {
     pub payout: HashMap<AccountId, U128>,
 }

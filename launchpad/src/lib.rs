@@ -1,7 +1,7 @@
 use near_sdk::{assert_one_yocto, require};
 // Find all our documentation at https://docs.near.org
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
-use near_sdk::{
+use near_sdk::{near,
     near_bindgen, AccountId, env, Promise, NearToken, Gas,
     serde_json::json, log
 };
@@ -20,8 +20,7 @@ pub struct Contract {
     admin: AccountId,
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(crate = "near_sdk::serde")]
+#[near(serializers=[json])] 
 pub struct ConfigInfo {
     pub treasury: AccountId,
     pub admin: AccountId
