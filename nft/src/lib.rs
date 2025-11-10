@@ -76,6 +76,8 @@ pub struct Contract {
 
     pub holders: UnorderedSet<AccountId>,
 
+    pub minters: UnorderedSet<AccountId>,
+
     pub treasury: AccountId,
 
     pub royalty: u128,
@@ -83,6 +85,8 @@ pub struct Contract {
     pub root_hash: String,
 
     pub is_public_mint: bool, 
+
+    pub is_unique_mint: bool,
 
     pub whitelist_count: u32
 }
@@ -102,6 +106,7 @@ enum StorageKey {
     FTDeposits,
     BalancesByOwner,
     Holders,
+    Minters
 }
 
 #[near_bindgen]
@@ -140,11 +145,13 @@ impl Contract {
             burn_fee: burn_fee.0,
             balances_by_owner: LookupMap::new(StorageKey::BalancesByOwner),
             holders: UnorderedSet::new(StorageKey::Holders),
+            minters: UnorderedSet::new(StorageKey::Minters),
             treasury: treasury,
             royalty: royalty.0,
             root_hash,
             is_public_mint: false,
-            whitelist_count: whitelist_count
+            whitelist_count: whitelist_count,
+            is_unique_mint: true
         }
     }
 
@@ -189,10 +196,15 @@ impl Contract {
             let leaves_to_prove = [Sha256::hash(env::predecessor_account_id().as_bytes())];
             require!(proof.verify(merkle_root, &[leaf_index as usize], &leaves_to_prove, self.whitelist_count as usize), "DS: This user isn't whitelisted.");
         }
+
         let collection_owner = &self.tokens.owner_id;
         let owner = env::predecessor_account_id();
+        if self.is_unique_mint {
+            require!(!self.minters.contains(&owner), "DS: You already minted one.")
+        }
         let token_id:TokenId = (self.index + 1).to_string();
         self.holders.insert(&owner);
+        self.minters.insert(&owner);
         let code = include_bytes!("./vault/vault.wasm").to_vec();
         let contract_bytes = code.len() as u128;
         let minimum_needed = NEAR_PER_STORAGE * contract_bytes + VAULT_STORAGE;
@@ -743,12 +755,15 @@ mod tests {
     #[test]
     fn test_merkle() {
         let leaf_values = [
-            "viernear.testnet", 
-            "vier1near.testnet", 
-            "vier2near.testnet", 
-            "vier3near.testnet", 
-            "vier4near.testnet", 
-            "vier5near.testnet"
+            "defishards.near", 
+            "devbose.near", 
+            "mf-69.near", 
+            "purre.near", 
+            "lok07.near", 
+            "olascious.near",
+            "nelson1906.near",
+            "liightrevival.near",
+            "deirazabalqueen.near"
         ];
         let leaves: Vec<[u8; 32]> = leaf_values
             .iter()
@@ -764,20 +779,24 @@ mod tests {
         // Parse proof back on the client
         let proof = MerkleProof::<Sha256>::try_from(proof_bytes.clone()).unwrap();
         let hex_root = hex::encode(merkle_root.clone());
-        println!("{:?}", merkle_root);
-        println!("{:?}", hex_root);
+        println!("mercle root {:?}", merkle_root);
+        println!("hex root {:?}", hex_root);
         println!("{:?}", hex::decode(hex_root).unwrap());
         assert!(proof.verify(merkle_root, &indices_to_prove, leaves_to_prove, leaves.len()));
     }
+
     #[test]
     fn test_mint() {
         let leaf_values = [
-            accounts(0).to_string(),
-            accounts(1).to_string(), 
-            accounts(2).to_string(), 
-            accounts(3).to_string(), 
-            accounts(4).to_string(), 
-            accounts(5).to_string()
+            "defishards.near", 
+            "devbose.near", 
+            "mf-69.near", 
+            "purre.near", 
+            "lok07.near", 
+            "olascious.near",
+            "nelson1906.near",
+            "liightrevival.near",
+            "deirazabalqueen.near"
         ];
         println!("{:?}", leaf_values);
         let leaves: Vec<[u8; 32]> = leaf_values
@@ -807,7 +826,7 @@ mod tests {
             reference: Some("newreference".to_string()),
             reference_hash: None,
         };
-        let indices_to_prove = vec![0];
+        let indices_to_prove = vec![2];
         let merkle_proof = merkle_tree.proof(&indices_to_prove);
         let proof_bytes: Vec<u8> = merkle_proof.to_bytes();
         let proof_hash = hex::encode(proof_bytes);
