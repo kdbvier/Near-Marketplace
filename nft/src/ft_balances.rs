@@ -27,6 +27,10 @@ impl FungibleTokenReceiver for Contract {
             //get the signer which is the person who initiated the transaction
             let signer_id = env::signer_account_id();
 
+            if self.is_unique_mint {
+                require!(!self.minters.contains(&signer_id), "DS: You already minted one.")
+            }
+
             //make sure that the signer isn't the predecessor. This is so that we're sure
             //this was called via a cross-contract call
             assert_ne!(
@@ -45,7 +49,6 @@ impl FungibleTokenReceiver for Contract {
             let mut cur_bal = self.ft_deposits.get(&signer_id).unwrap_or(0);
             cur_bal += amount.0;
             self.ft_deposits.insert(&signer_id, &cur_bal);
-
         }
 
         U128(0)
