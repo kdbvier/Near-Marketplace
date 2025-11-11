@@ -156,11 +156,12 @@ impl Contract {
     }
 
     #[payable]
-    pub fn set_mint_type(&mut self, is_public_mint: bool) {
+    pub fn set_mint_type(&mut self, is_public_mint: bool, is_unique_mint: bool) {
         assert_one_yocto();
         let owner = env::predecessor_account_id();
         require!(owner == self.tokens.owner_id, "DS: You are not an owner.");
         self.is_public_mint = is_public_mint;
+        self.is_unique_mint = is_unique_mint;
     }
 
     #[payable]
@@ -545,6 +546,10 @@ impl Contract {
 
     pub fn total_holders(&self) -> u64 {
         self.holders.len()
+    }
+
+    pub fn is_mintable(&self, account: AccountId) -> bool {
+        self.minters.contains(&account)
     }
 }
 
