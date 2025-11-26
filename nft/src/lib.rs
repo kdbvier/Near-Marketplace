@@ -61,6 +61,8 @@ pub struct Contract {
     pub total_supply: u128,
 
     pub mint_price: u128,
+
+    pub wl_price: u128,
     
     //which fungible token can be used to purchase NFTs
     pub mint_currency: Option<AccountId>, 
@@ -69,6 +71,8 @@ pub struct Contract {
 
     //keep track of how many FTs each account has deposited in order to purchase NFTs with
     pub ft_deposits: LookupMap<AccountId, Balance>,
+
+    pub nft_price: LookupMap<TokenId, u128>,
 
     pub burn_fee: u128,
 
@@ -106,7 +110,8 @@ enum StorageKey {
     FTDeposits,
     BalancesByOwner,
     Holders,
-    Minters
+    Minters,
+    NftPrice
 }
 
 #[near_bindgen]
@@ -116,6 +121,7 @@ impl Contract {
         owner_id: AccountId,
         metadata: NFTContractMetadata,
         mint_price: U128,
+        wl_price: U128,
         mint_currency: Option<AccountId>,
         payment_split_percent: U128,
         total_supply: U128,
@@ -139,11 +145,13 @@ impl Contract {
             index: 0,
             total_supply: total_supply.0,
             mint_price: mint_price.0,
+            wl_price: wl_price.0,
             mint_currency,
             payment_split_percent: payment_split_percent.0,
             ft_deposits: LookupMap::new(StorageKey::FTDeposits),
             burn_fee: burn_fee.0,
             balances_by_owner: LookupMap::new(StorageKey::BalancesByOwner),
+            nft_price: LookupMap::new(StorageKey::NftPrice),
             holders: UnorderedSet::new(StorageKey::Holders),
             minters: UnorderedSet::new(StorageKey::Minters),
             treasury: treasury,
@@ -188,7 +196,9 @@ impl Contract {
         proof: String,
         leaf_index: u32
     ) -> Token {
+        let mut price = self.mint_price;
         if !self.is_public_mint {
+            price = self.wl_price;
             let proof_bytes: Vec<u8> = hex::decode(proof).expect("DS: Invalid proof");
             // Parse proof back on the client
             let proof = MerkleProof::<Sha256>::try_from(proof_bytes.clone()).unwrap();
@@ -212,19 +222,19 @@ impl Contract {
         let deposit: u128 = env::attached_deposit().as_yoctonear();
         if let Some(_) = self.mint_currency.clone() {
             let mut amount = self.ft_deposits_of(owner.clone());
-            require!(deposit >= minimum_needed && amount >= self.mint_price, "Insufficient price to mint");
-            amount -= self.mint_price;
+            require!(deposit >= minimum_needed && amount >= price, "Insufficient price to mint");
+            amount -= price;
             self.ft_deposits.insert(&owner, &amount);
         } else {
-            require!(deposit >= self.mint_price + minimum_needed, "Insufficient price to mint");
+            require!(deposit >= price + minimum_needed, "Insufficient price to mint");
         }
 
         let current_id = env::current_account_id();
 
-        let vault_amount = self.mint_price.checked_mul(self.payment_split_percent)
+        let vault_amount = price.checked_mul(self.payment_split_percent)
             .unwrap().checked_div(100u128).unwrap();
 
-        let owner_amount = self.mint_price.checked_sub(vault_amount).unwrap();
+        let owner_amount = price.checked_sub(vault_amount).unwrap();
 
         // Deploy the vault contract
         let vault_account_id: AccountId = format!("{}.{}", token_id, current_id).parse().unwrap();
@@ -265,7 +275,8 @@ impl Contract {
             require!(self.total_supply >= self.index, "Exceeded total supply");
         }
 
-        let token = self.tokens.internal_mint_with_refund(token_id, token_owner_id, Some(token_metadata), None);
+        let token = self.tokens.internal_mint_with_refund(token_id.clone(), token_owner_id, Some(token_metadata), None);
+        self.nft_price.insert(&token_id, &price);
         NftMint { owner_id: &token.owner_id, token_ids: &[&token.token_id], memo: None }.emit();
         token
     }
@@ -317,7 +328,7 @@ impl Contract {
         let owner = env::predecessor_account_id();
 
         let token_owner = self.tokens.owner_by_id.get(&token_id).unwrap();
-
+        let mint_price = self.nft_price.get(&token_id).unwrap();
         require!(owner.clone() == token_owner, "You don't own this NFT");
 
         // Remove the NFT from the owner's account
@@ -365,7 +376,7 @@ impl Contract {
         let amount_to_holder: u128 = if holders_count == 0 {
             0u128
         } else { 
-            self.mint_price
+            mint_price
                 .checked_mul(self.payment_split_percent).unwrap()
                 .checked_mul(self.burn_fee).unwrap()
                 .checked_div(20000u128).unwrap()
@@ -742,6 +753,7 @@ mod tests {
         let contract = Contract::new(
             accounts(0),
             metadata,
+            U128::from(10000000),
             U128::from(10000000),
             None,
             U128::from(50),
