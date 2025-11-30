@@ -180,6 +180,13 @@ impl Contract {
         self.whitelist_count = whitelist_count;
         self.root_hash = root_hash;
     }
+    #[payable]
+    pub fn set_collection_owner(&mut self, owner: AccountId) {
+        assert_one_yocto();
+        let old_owner = env::predecessor_account_id();
+        require!(old_owner == self.tokens.owner_id, "DS: You are not an owner.");
+        self.tokens.owner_id = owner;
+    }
     /// Mint a new token with ID=`token_id` belonging to `token_owner_id`.
     ///
     /// Since this example implements metadata, it also requires per-token metadata to be provided

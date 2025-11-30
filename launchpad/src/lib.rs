@@ -69,6 +69,21 @@ impl Contract {
     }
 
     #[payable]
+    pub fn update_collection(
+        &mut self,
+        nft_contract_id: AccountId
+    ) {
+        assert_one_yocto();
+        assert_eq!(
+            env::predecessor_account_id(),
+            self.admin,
+            "Admin only"
+        );
+        let code = include_bytes!("./nft/nft.wasm").to_vec();
+        Promise::new(nft_contract_id).deploy_contract(code);
+    }
+
+    #[payable]
     pub fn launch(
         &mut self,
         metadata: NFTContractMetadata,
