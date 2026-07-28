@@ -1,0 +1,20 @@
+{
+  "name": "near-marketplace-subgraph",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The Graph subgraph indexing the Near-Marketplace launchpad, NFT collections and marketplace contracts",
+  "scripts": {
+    "codegen": "graph codegen",
+    "build": "graph build",
+    "auth": "graph auth",
+    "deploy": "graph deploy near-marketplace",
+    "create-local": "graph create --node http://localhost:8020/ near-marketplace",
+    "remove-local": "graph remove --node http://localhost:8020/ near-marketplace",
+    "deploy-local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 near-marketplace"
+  },
+  "dependencies": {
+    "@graphprotocol/graph-cli": "^0.98.1",
+    "@graphprotocol/graph-ts": "^0.38.2",
+    "assemblyscript": "^0.19.23"
+  }
+}

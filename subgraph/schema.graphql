@@ -1,0 +1,156 @@
+####################################################################################
+# Near-Marketplace subgraph schema
+#
+# Entity ids
+#   Collection : the NFT contract account id            e.g. "shardsquares.factory.defishards.near"
+#   Nft        : "<nft_contract_id>||<token_id>"        (same key the marketplace contract uses)
+#   Bid        : "<nft id>||<bidder_id>"                (contract keeps at most one bid per bidder)
+#   Account    : the NEAR account id
+####################################################################################
+
+type MarketplaceStats @entity(immutable: false) {
+  "always `marketplace`"
+  id: ID!
+  ownerId: String
+  treasuryId: String
+  "basis points, 10_000 = 100%"
+  transactionFee: BigInt
+  "cumulative yoctoNEAR traded through `resolve_purchase`"
+  totalVolume: BigInt!
+  totalSales: BigInt!
+  "number of Nfts currently with marketStatus == `sale`"
+  listedCount: BigInt!
+}
+
+type Collection @entity(immutable: false) {
+  "nft contract account id"
+  id: ID!
+  "account that called `launch`"
+  creator: String
+  "current `tokens.owner_id`, kept in sync with `set_collection_owner`"
+  owner: String
+  "false while the collection is in whitelist-only minting"
+  isPublicMint: Boolean!
+  "true while each account may mint at most one token"
+  isUniqueMint: Boolean!
+  name: String
+  symbol: String
+  baseUri: String
+  reference: String
+  "null => minted with NEAR, otherwise the FT contract account id"
+  mintCurrency: String
+  mintPrice: BigInt!
+  wlPrice: BigInt!
+  "basis points, 10_000 = 100%"
+  royalty: BigInt!
+  totalSupply: BigInt!
+  mintedCount: BigInt!
+  burnedCount: BigInt!
+  listedCount: BigInt!
+  "lowest price among Nfts currently listed; null when nothing is listed"
+  floorPrice: BigInt
+  volume: BigInt!
+  totalSales: BigInt!
+  "true when the Collection was created by a `launch` event rather than inferred from a listing"
+  launched: Boolean!
+  createdAt: BigInt!
+  createdAtBlock: BigInt!
+  updatedAt: BigInt!
+  nfts: [Nft!]! @derivedFrom(field: "collection")
+}
+
+type Account @entity(immutable: false) {
+  "near account id"
+  id: ID!
+  ownedCount: Int!
+  mintedCount: Int!
+  totalSpent: BigInt!
+  totalEarned: BigInt!
+  nfts: [Nft!]! @derivedFrom(field: "owner")
+  bids: [Bid!]! @derivedFrom(field: "bidder")
+}
+
+type Nft @entity(immutable: false) {
+  "<nft_contract_id>||<token_id>"
+  id: ID!
+  collection: Collection!
+  tokenId: String!
+  owner: Account!
+  minter: Account
+
+  # --- metadata (from the `nft_mint` call args) ---
+  title: String
+  description: String
+  media: String
+  reference: String
+  extra: String
+
+  # --- market ---
+  "`sale` while listed (fixed price OR auction), `none` otherwise"
+  marketStatus: String!
+  "listing price in yoctoNEAR; starting price for auctions; 0 when not listed"
+  price: BigInt!
+  "dutch auction resting price"
+  endPrice: BigInt
+  isAuction: Boolean!
+  "account that listed the token (market_data.owner_id)"
+  seller: String
+  approvalId: BigInt
+  startedAt: BigInt
+  endedAt: BigInt
+  topBid: Bid
+  bidCount: Int!
+  bids: [Bid!]! @derivedFrom(field: "nft")
+  "account ids with a live bid — kept non-derived so mappings can walk them"
+  activeBidders: [String!]!
+  listedAt: BigInt
+
+  # --- history ---
+  mintPrice: BigInt
+  mintedAt: BigInt
+  lastSalePrice: BigInt
+  lastSaleAt: BigInt
+  saleCount: BigInt!
+  burned: Boolean!
+  updatedAt: BigInt!
+  activities: [Activity!]! @derivedFrom(field: "nft")
+}
+
+type Bid @entity(immutable: false) {
+  "<nft id>||<bidder_id>"
+  id: ID!
+  nft: Nft!
+  bidder: Account!
+  amount: BigInt!
+  "false once the bid was cancelled, outbid-refunded or accepted"
+  active: Boolean!
+  createdAt: BigInt!
+  updatedAt: BigInt!
+}
+
+enum ActivityType {
+  mint
+  list
+  unlist
+  sale
+  bid
+  cancel_bid
+  extend_auction
+  transfer
+  burn
+  launch
+}
+
+type Activity @entity(immutable: true) {
+  "<receipt id>-<log index>"
+  id: ID!
+  type: ActivityType!
+  nft: Nft
+  collection: Collection
+  from: String
+  to: String
+  price: BigInt
+  timestamp: BigInt!
+  blockHeight: BigInt!
+  receiptId: String!
+}

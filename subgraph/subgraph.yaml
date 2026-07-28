@@ -1,0 +1,132 @@
+specVersion: 0.0.5
+description: Near-Marketplace — collections, listings, bids and sales
+repository: https://github.com/defishards/Near-Marketplace
+schema:
+  file: ./schema.graphql
+dataSources:
+  # ------------------------------------------------------------------
+  # Marketplace contract — listings, bids, purchases
+  # ------------------------------------------------------------------
+  - kind: near
+    name: Marketplace
+    # near-mainnet | near-testnet
+    network: near-mainnet
+    source:
+      # TODO: replace with the deployed marketplace account id
+      account: "marketplace.defishards.near"
+      # TODO: block the marketplace contract was deployed at
+      startBlock: 140674807
+    mapping:
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - MarketplaceStats
+        - Collection
+        - Account
+        - Nft
+        - Bid
+        - Activity
+      receiptHandlers:
+        - handler: handleMarketplaceReceipt
+      file: ./src/marketplace.ts
+
+  # ------------------------------------------------------------------
+  # Launchpad contract — `launch` events create Collections
+  # ------------------------------------------------------------------
+  - kind: near
+    name: Factory
+    network: near-mainnet
+    source:
+      account: "factory.defishards.near"
+      # TODO: block the launchpad contract was deployed at
+      startBlock: 167749441
+    mapping:
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - Collection
+        - Account
+        - Activity
+      receiptHandlers:
+        - handler: handleLaunchpadReceipt
+      file: ./src/launchpad.ts
+
+  # ------------------------------------------------------------------
+  # Launchpad contract — `launch` events create Collections
+  # ------------------------------------------------------------------
+  - kind: near
+    name: Launchpad
+    network: near-mainnet
+    source:
+      account: "launchpad.defishards.near"
+      # TODO: block the launchpad contract was deployed at
+      startBlock: 172085960
+    mapping:
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - Collection
+        - Account
+        - Activity
+      receiptHandlers:
+        - handler: handleLaunchpadReceipt
+      file: ./src/launchpad.ts
+
+  # ------------------------------------------------------------------
+  # Every NFT collection deployed by the launchpad lives at
+  # `<nft_id>.factory.defishards.near`, so match on the suffix.
+  # NEAR subgraphs have no dataSource templates — this is the only way
+  # to follow dynamically created sub-accounts.
+  #
+  # NOTE: this also matches the per-token vault accounts
+  # (`<token_id>.<collection>.factory.defishards.near`); they never emit
+  # NEP-171 events so the handler ignores them.
+  # ------------------------------------------------------------------
+  - kind: near
+    name: Factory-Collections
+    network: near-mainnet
+    source:
+      accounts:
+        suffixes:
+          - ".factory.defishards.near"
+      startBlock: 167749441
+    mapping:
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - Collection
+        - Account
+        - Nft
+        - Activity
+      receiptHandlers:
+        - handler: handleCollectionReceipt
+      file: ./src/nft.ts
+  # ------------------------------------------------------------------
+  # Every NFT collection deployed by the launchpad lives at
+  # `<nft_id>.factory.defishards.near`, so match on the suffix.
+  # NEAR subgraphs have no dataSource templates — this is the only way
+  # to follow dynamically created sub-accounts.
+  #
+  # NOTE: this also matches the per-token vault accounts
+  # (`<token_id>.<collection>.factory.defishards.near`); they never emit
+  # NEP-171 events so the handler ignores them.
+  # ------------------------------------------------------------------
+  - kind: near
+    name: Launchpad-Collections
+    network: near-mainnet
+    source:
+      accounts:
+        suffixes:
+          - ".launchpad.defishards.near"
+      startBlock: 172085960
+    mapping:
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - Collection
+        - Account
+        - Nft
+        - Activity
+      receiptHandlers:
+        - handler: handleCollectionReceipt
+      file: ./src/nft.ts
